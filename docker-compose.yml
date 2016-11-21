@@ -1,0 +1,61 @@
+version: '2'
+
+services:
+  redoctober.local:
+    image: dqminh/redoctober:latest
+    ports:
+      - 8080:8080
+    environment:
+      RO_COMMONNAME: redoctober.local
+    volumes:
+      - redoctober:/var/lib/redoctober/data
+    networks:
+      - redoctober
+
+  pald:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    pid: host
+    volumes:
+      - redoctober:/var/lib/redoctober/data
+      - pald:/var/run
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redoctober.local
+    networks:
+      - redoctober
+
+  pal:
+    image: dqminh/pal:client-integration
+    entrypoint:
+      - /docker-entrypoint
+      - --ro_host=redoctober.local
+      - --ro_port=8080
+      - --
+    command:
+      - /usr/bin/pal
+      - -socket=/var/run/pald.sock
+      - -env=dev
+      - --
+      - env
+    volumes:
+      - ./script/pal-integration:/docker-entrypoint
+      - ./bin/pal:/usr/bin/pal
+      - ./bin/palpgpenc:/usr/bin/palpgpenc
+      - ./testdata/pubring.gpg:/etc/pal/pubring.gpg
+      - redoctober:/var/lib/redoctober/data
+      - pald:/var/run
+    depends_on:
+      - redoctober.local
+      - pald
+    networks:
+      - redoctober
+
+volumes:
+  redoctober:
+  pald:
+
+networks:
+  redoctober:

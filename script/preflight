@@ -1,0 +1,20 @@
+#!/bin/bash -e
+
+go_version=$(jq -r .GoVersion <Godeps/Godeps.json)
+if [[ -z "$(go version | grep $go_version)" ]] ; then
+  echo "Error, required version of Go: $go_version" >&2
+  echo "  sudo apt-get install go" >&2
+  exit 1
+fi
+
+if [[ -z "$(which jq)" ]] ; then
+   echo "Error, missing tool: jq" >&2
+   echo "   sudo apt-get install jq" >&2
+   exit 1
+fi
+
+if [[ -z "$(which godep)" ]] ; then
+  echo "Error, missing tool: Godep" >&2
+  echo "  go get github.com/tools/godep" >&2
+  exit 1
+fi

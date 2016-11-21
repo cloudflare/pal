@@ -1,0 +1,122 @@
+#!/bin/bash -e
+# Make sure the local redoctober is ready with our test user
+
+ro_host="localhost"
+ro_port="8080"
+pubring_location="/etc/pal/pubring.gpg"
+for i in $@; do
+  case $i in
+    --ro_host=*)
+      ro_host=${i#*=}
+      shift
+      ;;
+    --ro_port=*)
+      ro_port=${i#*=}
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      echo "unexpected args $i"
+      exit 1
+      ;;
+  esac
+done
+
+wait_ro() {
+  echo "waiting for ${ro_host}:${ro_port}"
+  # wait until redoctober is running
+  status="$(nc -z -v -q 0 $ro_host $ro_port 2>/dev/null ; echo $?)"
+  while [ "${status}" != "0" ] ; do
+    sleep 1
+    status="$(nc -z -v -q 0 $ro_host $ro_port 2>/dev/null ; echo $?)"
+  done
+  echo "RedOctober is started and listening on $ro_host:$ro_port"
+}
+
+ensure_user() {
+  local user=$1
+  local password=$2
+  echo "ensure user $user with password $password"
+  body=$(curl --silent --cacert /tmp/server.crt -d \
+    '{"Name":"'$user'","Password":"'$password'"}' \
+    https://$ro_host:$ro_port/summary)
+  if [[ $body =~ "has not been created" ]]; then
+    echo "vault does not exists. Creating vault with $user"
+    body=$(curl --silent --cacert /tmp/server.crt -d \
+      '{"Name":"'$user'","Password":"'$password'"}' \
+      https://$ro_host:$ro_port/create)
+    if [[ $body == '{"Status":"ok"}' ]]; then
+      ensure_user $user $password
+    else
+      echo "failed to create user: $body"
+      exit 1
+    fi
+  elif [[ $body =~ "not present" ]]; then
+    echo "user does not exists. Creating user $user"
+    body=$(curl --silent --cacert /tmp/server.crt -d \
+      '{"Name":"'$user'","Password":"'$password'","UserType":"RSA"}' \
+      https://$ro_host:$ro_port/create-user)
+    if [[ $body == '{"Status":"ok"}' ]]; then
+      ensure_user $user $password
+    else
+      echo "failed to create user: $user"
+      exit 1
+    fi
+  else
+    echo "user $user exists."
+  fi
+}
+
+encrypt_data() {
+  local data=$1
+  enc_data=$(echo -n $data | openssl base64)
+  echo $enc_data
+
+  pgp_response=$(echo -n 'this is pgp-encrypted secret' | \
+    palpgpenc \
+    -labels=pal \
+    -keyids=BFA130C83AEEFBA1 \
+    -pubring=${pubring_location})
+  pgp_status=$?
+
+  body=$(curl --silent --cacert /tmp/server.crt \
+    https://$ro_host:$ro_port/encrypt  \
+    -d '{"Name":"Alice","Password":"Lewis","Minimum":1,"Labels":["pal"],"Owners":["Alice","Batman"],"Data":"'$enc_data'"}')
+  ro_status=$(echo $body | jq -r .Status)
+  ro_response=$(echo $body | jq -r .Response)
+  if [[ $ro_status == "ok" && $pgp_status -eq 0 ]]; then
+    export PAL_SECRETS_YAML=$(cat << EOF
+dev:
+  env:
+    RO_VAR: ro:${ro_response}
+    PGP_VAR: pgp:${pgp_response}
+EOF
+)
+    echo $PAL_SECRETS_YAML
+  else
+    echo "failed to encrypt data"
+    exit 1
+  fi
+}
+
+ensure_delegation() {
+  local user=$1
+  local password=$2
+  curl --silent --cacert /tmp/server.crt https://$ro_host:$ro_port/delegate \
+    -d '{"Name":"'$user'","Password":"'$password'","Time":"1h","Uses":10,"Labels":["pal"]}'
+  echo ""
+}
+
+wait_ro
+
+cp /var/lib/redoctober/data/server.crt /tmp/server.crt
+chmod 644 /tmp/server.crt
+
+ensure_user Alice Lewis
+ensure_user Batman Robin
+ensure_delegation Alice Lewis
+encrypt_data "Why is a raven like a writing desk?"
+exec $@
