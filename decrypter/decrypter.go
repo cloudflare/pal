@@ -34,7 +34,7 @@ type Decrypter interface {
 //		decrypterType[+base64]:encryptedSecret
 func SplitPALValue(line string) (decrypterType string, binary bool, value string) {
 	s := valRegex.FindAllStringSubmatch(line, -1)
-	if len(s) != 1 && len(s[0]) != 4 {
+	if s == nil || (len(s) != 1 && len(s[0]) != 4) {
 		return "", false, ""
 	}
 	matched := s[0]

@@ -8,6 +8,7 @@ func TestSplitPALValue(t *testing.T) {
 		binary        bool
 		value         string
 	}{
+		"asd":           {"", false, ""},
 		"ro:asd":        {"ro", false, "asd"},
 		"ro+base64:asd": {"ro", true, "asd"},
 		"rotbase64:asd": {"rotbase64", false, "asd"},
@@ -16,7 +17,7 @@ func TestSplitPALValue(t *testing.T) {
 		if decrypterType != expected.decrypterType ||
 			binary != expected.binary ||
 			value != expected.value {
-			t.Errorf("expected %#v, got type=%s, binary=%v, value=%v", expected,
+			t.Errorf("expected %+v, got type=%s, binary=%v, value=%v", expected,
 				decrypterType, binary, value)
 		}
 	}

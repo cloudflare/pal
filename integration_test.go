@@ -81,6 +81,8 @@ func init() {
 }
 
 func TestServer(t *testing.T) {
+	const nopSecret = "nom nom nom"
+
 	addr := socketPath()
 	listener, err := net.Listen("unix", addr)
 	if err != nil {
@@ -97,10 +99,12 @@ func TestServer(t *testing.T) {
 
 	cfg := &config{
 		Envs: map[string]string{
+			"NOP":   nopSecret,
 			"PLAIN": "ro:" + plainCipherText,
 			"B64":   "ro+base64:" + base64CipherText,
 		},
 		Files: map[string]string{
+			"/path/to/nop":   nopSecret,
 			"/path/to/plain": "ro:" + plainCipherText,
 			"/path/to/b64":   "ro+base64:" + base64CipherText,
 		},
@@ -113,16 +117,22 @@ func TestServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := client.envSecrets["PLAIN"]; got != plainSecret {
+	if got := client.config.Envs["NOP"]; got != nopSecret {
+		t.Errorf("want ro: secret %q, got %q", nopSecret, got)
+	}
+	if got := client.config.Files["/path/to/nop"]; got != nopSecret {
 		t.Errorf("want ro: secret %q, got %q", plainSecret, got)
 	}
-	if got := client.fileSecrets["/path/to/plain"]; got != plainSecret {
+	if got := client.config.Envs["PLAIN"]; got != plainSecret {
 		t.Errorf("want ro: secret %q, got %q", plainSecret, got)
 	}
-	if got := client.envSecrets["B64"]; got != "base64:"+base64Secret {
+	if got := client.config.Files["/path/to/plain"]; got != plainSecret {
+		t.Errorf("want ro: secret %q, got %q", plainSecret, got)
+	}
+	if got := client.config.Envs["B64"]; got != "base64:"+base64Secret {
 		t.Errorf("want ro+base64: secret %q, got %q", "base64:"+base64Secret, got)
 	}
-	if got := client.fileSecrets["/path/to/b64"]; got != "base64:"+base64Secret {
+	if got := client.config.Files["/path/to/b64"]; got != "base64:"+base64Secret {
 		t.Errorf("want ro+base64: secret %q, got %q", "base64:"+base64Secret, got)
 	}
 }

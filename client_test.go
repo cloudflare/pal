@@ -121,12 +121,12 @@ func TestClientExec(t *testing.T) {
 	client := newClient(cfg, path.Join(tmpdir, "test.sock"))
 
 	// assume that the secrets have been decrypted here
-	client.envSecrets = map[string]string{
+	client.config.Envs = map[string]string{
 		"FOO": "uno",
 		"BAR": base64Encode("dos"),
 		"BAZ": "tres",
 	}
-	client.fileSecrets = map[string]string{
+	client.config.Files = map[string]string{
 		path.Join(tmpdir, "plain"):  "plain text data",
 		path.Join(tmpdir, "base64"): base64Encode("base64 encoded data"),
 	}
