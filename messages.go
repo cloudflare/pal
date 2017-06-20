@@ -7,16 +7,23 @@ type decryptionRequest struct {
 }
 
 type decryptionResponse struct {
-	Error   *errorMsg         `json:"error,omitempty"`
+	Error   *decryptionError  `json:"error,omitempty"`
 	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
-type errorMsg struct {
+type decryptionError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Secret  string `json:"secret"`
 }
 
-func (e *errorMsg) Error() string {
+// decryptionErrorV1 is used to communicate with legacy client
+type decryptionErrorV1 struct {
+	Code   int
+	Err    string
+	Secret string
+}
+
+func (e *decryptionError) Error() string {
 	return fmt.Sprintf("code: %d, reason: %s", e.Code, e.Message)
 }

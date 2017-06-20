@@ -1,273 +1,124 @@
 package pal
 
 import (
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"io/ioutil"
+	"math/rand"
 	"net"
-	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/cloudflare/pal/trustedlabels"
-	ro "github.com/cloudflare/redoctober"
 	"github.com/cloudflare/redoctober/client"
-	roConfig "github.com/cloudflare/redoctober/config"
 	"github.com/cloudflare/redoctober/core"
-	"github.com/uber-go/zap"
+	"github.com/joshlf/testutil"
 )
 
-var (
-	cert, key = tempFile(roCert), tempFile(roKey)
-
-	serverConfig = &ServerConfig{
-		ROServer:        strings.TrimPrefix(mustROServer(cert, key).URL, "https://"),
-		LabelsRetriever: "mocker",
-		CABundle:        cert,
-		User:            paldUser,
-		Password:        paldPass,
-	}
-	server *Server
-
+const (
+	adminUser, adminPass = "admin-user", "admin-password"
 	paldUser, paldPass   = "pald-user", "pald-password"
 	aliceUser, alicePass = "alice", "alice-password"
 	bobUser, bobPass     = "bob", "bob-password"
+	plainSecret          = "i am a plain secret"
+	testLabel            = "test-label"
+)
 
-	plainSecret  = "i am a plain secret"
-	base64Secret = string(base64.StdEncoding.EncodeToString([]byte("i am a base64 encoded secret")))
-
-	plainCipherText, base64CipherText string
-
-	mockLabelsRetriever = trustedlabels.NewMocker(
+var (
+	base64Secret        = string(base64.StdEncoding.EncodeToString([]byte("i am a base64 encoded secret")))
+	mockLabelsRetriever = trustedlabels.NewMock(
 		map[string]struct{}{
 			"app-foo":     {},
 			"test-secret": {},
 		},
 	)
-
-	logger = zap.New(zap.NewTextEncoder())
 )
 
-func init() {
-	roServer, err := client.NewRemoteServer(serverConfig.ROServer, serverConfig.CABundle)
-	if err != nil {
-		panic(err)
-	}
-
-	if _, err = roServer.Create(core.CreateRequest{Name: "test-admin", Password: "test-passwd"}); err != nil {
-		panic(err)
-	}
-	if _, err = roServer.CreateUser(core.CreateUserRequest{Name: paldUser, Password: paldPass}); err != nil {
-		panic(err)
-	}
-	if _, err = roServer.CreateUser(core.CreateUserRequest{Name: aliceUser, Password: alicePass}); err != nil {
-		panic(err)
-	}
-	if _, err = roServer.CreateUser(core.CreateUserRequest{Name: bobUser, Password: bobPass}); err != nil {
-		panic(err)
-	}
-
-	plainCipherText = mustEncrypt(plainSecret, []string{"test-secret"})
-	base64CipherText = mustEncrypt(base64Secret, []string{"test-secret"})
-	server, err = NewServer(logger, serverConfig)
-	if err != nil {
-		panic(fmt.Sprintf("failed to initialized new server %v", err))
-	}
-	server.labelsRetriever = mockLabelsRetriever
+// returns the listener and the temporary directory that was created to contain
+// it; the listener should be closed and the directory deleted when finished
+func mustListenUnixSocket(t *testing.T) (net.Listener, string) {
+	tempdir := testutil.MustTempDir(t, "", "pal-test")
+	l, err := net.Listen("unix", filepath.Join(tempdir, "pald.sock"))
+	testutil.MustPrefix(t, "could not listen on unix socket", err)
+	return l, tempdir
 }
 
-func TestServer(t *testing.T) {
-	addr := socketPath()
-	listener, err := net.Listen("unix", addr)
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
+type roTestInstance struct {
+	tempdir    string
+	cert       string
+	server     *roServer
+	serverAddr string
+	client     *client.RemoteServer
+}
 
-	go func() {
-		err := server.ServeRPC(listener)
-		if err != nil {
-			t.Log(err)
+func mustROTestInstance(t *testing.T) *roTestInstance {
+	tempdir := testutil.MustTempDir(t, "", "pal-ro-test")
+	cert := testutil.MustWriteTempFile(t, tempdir, "", roCert)
+	key := testutil.MustWriteTempFile(t, tempdir, "", roKey)
+	vault := filepath.Join(tempdir, "test.vaul")
+
+	// Choose random ports for both the client communication and the metrics so
+	// that we minimize the probability of a port collision that would  cause
+	// redoctober to fail to start. This is certainly a hack, but it's a hack that
+	// works well enough.
+	randPort := func() int { return rand.New(rand.NewSource(time.Now().UnixNano())).Intn((1<<16)-1024) + 1024 }
+	port := randPort()
+	metricsPort := randPort()
+	addr := fmt.Sprintf("localhost:%v", port)
+	server := mustROServer(t, vault, cert, key, addr, strconv.Itoa(metricsPort))
+	// we set this to false just before returning; if it's still true in the
+	// defered func, we must be panicking
+	panicking := true
+	defer func() {
+		if panicking {
+			server.Quit(t)
 		}
 	}()
 
-	cfg := &config{
-		Envs: map[string]string{
-			"PLAIN": "ro:" + plainCipherText,
-			"B64":   "ro+base64:" + base64CipherText,
-		},
-		Files: map[string]string{
-			"/path/to/plain": "ro:" + plainCipherText,
-			"/path/to/b64":   "ro+base64:" + base64CipherText,
-		},
-		EntryPoint: "env -t /foo/bar.tmpl:/foo/bar -E",
-		Command:    "true -entrypoint-flag=foo --",
-	}
+	client, err := client.NewRemoteServer(addr, cert)
+	testutil.MustPrefix(t, "could not create redoctober client", err)
 
-	client := newClient(cfg, addr)
-	if err := client.Decrypt(); err != nil {
-		t.Fatal(err)
+	create := func(user, pass string) {
+		_, err := client.CreateUser(core.CreateUserRequest{Name: user, Password: pass})
+		testutil.MustPrefix(t, fmt.Sprintf("could not create Red October user %v", user), err)
 	}
+	// Create creates an admin user, while CreateUser creates a normal user
+	_, err = client.Create(core.CreateRequest{Name: adminUser, Password: adminPass})
+	testutil.MustPrefix(t, fmt.Sprintf("could not create Red October admin %v", adminUser), err)
+	create(paldUser, paldPass)
+	create(aliceUser, alicePass)
+	create(bobUser, bobPass)
 
-	if got := client.envSecrets["PLAIN"]; got != plainSecret {
-		t.Errorf("want ro: secret %q, got %q", plainSecret, got)
-	}
-	if got := client.fileSecrets["/path/to/plain"]; got != plainSecret {
-		t.Errorf("want ro: secret %q, got %q", plainSecret, got)
-	}
-	if got := client.envSecrets["B64"]; got != "base64:"+base64Secret {
-		t.Errorf("want ro+base64: secret %q, got %q", "base64:"+base64Secret, got)
-	}
-	if got := client.fileSecrets["/path/to/b64"]; got != "base64:"+base64Secret {
-		t.Errorf("want ro+base64: secret %q, got %q", "base64:"+base64Secret, got)
+	panicking = false
+	return &roTestInstance{
+		tempdir:    tempdir,
+		cert:       cert,
+		server:     server,
+		serverAddr: addr,
+		client:     client,
 	}
 }
 
-func TestServerWithInvalidLabel(t *testing.T) {
-	addr := socketPath()
-	listener, err := net.Listen("unix", addr)
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
-
-	go func() {
-		err := server.ServeRPC(listener)
-		if err != nil {
-			t.Log(err)
-		}
-	}()
-
-	cfg := &config{
-		Envs: map[string]string{
-			"PLAIN": "ro:" + mustEncrypt(plainSecret, []string{"required-label-but-not-exist"}),
-		},
-		EntryPoint: "env -t /foo/bar.tmpl:/foo/bar -E",
-		Command:    "true -entrypoint-flag=foo --",
-	}
-
-	client := newClient(cfg, addr)
-	if err := client.Decrypt(); err == nil {
-		t.Fatal("want unauthorized label error, got nil")
-	}
-}
-
-func TestServerWithoutPeerCred(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
-
-	go func() {
-		err := server.ServeRPC(listener)
-		if err != nil {
-			t.Log(err)
-		}
-	}()
-
-	cfg := &config{
-		Envs: map[string]string{
-			"B64": "ro+base64:" + base64CipherText,
-		},
-		EntryPoint: "env -t /foo/bar.tmpl:/foo/bar -E",
-		Command:    "true -entrypoint-flag=foo --",
-	}
-
-	client := &Client{
-		socketAddr: listener.Addr().String(),
-		config:     cfg,
-		dialFunc: func(_, _ string) (net.Conn, error) {
-			return net.Dial("tcp", listener.Addr().String())
-		},
-	}
-	if err := client.Decrypt(); err == nil {
-		t.Fatal("expected error when calling RPC with a TCP connection but got nil")
-	}
-}
-
-func socketPath() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("pal-test-%d.sock", time.Now().UnixNano()))
-}
-
-func mustROServer(cert, key string) *httptest.Server {
-	vaultPath, err := ioutil.TempDir("", "ro")
-	if err != nil {
-		panic(err)
-	}
-	vaultPath += "test.vault"
-
-	if err := core.Init(vaultPath, &roConfig.Config{
-		HipChat:     &roConfig.HipChat{},
-		Delegations: &roConfig.Delegations{},
-	}); err != nil {
-		panic(err)
-	}
-
-	roCerts, roKeys := []string{cert}, []string{key}
-
-	s, _, err := ro.NewServer(vaultPath, "", "", roCerts, roKeys, false)
-	if err != nil {
-		panic(err)
-	}
-
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		panic(err)
-	}
-
-	cfg := &tls.Config{
-		PreferServerCipherSuites: true,
-		SessionTicketsDisabled:   true,
-	}
-	for i, certPath := range roCerts {
-		cert, err := tls.LoadX509KeyPair(certPath, roKeys[i])
-		if err != nil {
-			panic(fmt.Errorf("Error loading certificate (%s, %s): %s", certPath, roKeys[i], err))
-		}
-		cfg.Certificates = append(cfg.Certificates, cert)
-	}
-	cfg.BuildNameToCertificate()
-
-	l = tls.NewListener(l, cfg)
-
-	go s.Serve(l)
-
-	// add provisioning of users via API calls
-	// encrypt a secret, return the ciphertext
-
-	port := strings.Split(l.Addr().String(), ":")[1]
-
-	return &httptest.Server{
-		Listener: l,
-		URL:      "https://localhost:" + port,
-	}
-}
-
-func mustEncrypt(secret string, labels []string) string {
-	roServer, err := client.NewRemoteServer(serverConfig.ROServer, serverConfig.CABundle)
-	if err != nil {
-		panic(err)
-	}
-
+// Encrypts the given secret with the given encryptLabels for both alice and bob
+// with a minimum of two delegations. Then, alice and bob each delegate for
+// delegateLabels.
+func (r *roTestInstance) mustEncryptAndDelegate(t *testing.T, secret string,
+	encryptLabels, delegateLabels []string) string {
 	ereq := core.EncryptRequest{
 		Name:     aliceUser,
 		Password: alicePass,
 
 		Owners:  []string{aliceUser, bobUser},
 		Data:    []byte(secret),
-		Labels:  labels,
+		Labels:  encryptLabels,
 		Minimum: 2,
 	}
 
-	eres, err := roServer.Encrypt(ereq)
-	if err != nil {
-		panic(err)
-	}
+	eres, err := r.client.Encrypt(ereq)
+	testutil.MustPrefix(t, "could not encrypt secret", err)
 
 	dr := core.DelegateRequest{
 		Name:     aliceUser,
@@ -275,12 +126,11 @@ func mustEncrypt(secret string, labels []string) string {
 		Uses:     1000000,
 		Time:     "100h",
 		Users:    []string{paldUser},
-		Labels:   labels,
+		Labels:   delegateLabels,
 	}
 
-	if _, err := roServer.Delegate(dr); err != nil {
-		panic(err)
-	}
+	_, err = r.client.Delegate(dr)
+	testutil.MustPrefix(t, "could not delegate", err)
 
 	dr = core.DelegateRequest{
 		Name:     bobUser,
@@ -288,34 +138,48 @@ func mustEncrypt(secret string, labels []string) string {
 		Uses:     1000000,
 		Time:     "100h",
 		Users:    []string{paldUser},
-		Labels:   labels,
+		Labels:   delegateLabels,
 	}
 
-	if _, err := roServer.Delegate(dr); err != nil {
-		panic(err)
-	}
+	_, err = r.client.Delegate(dr)
+	testutil.MustPrefix(t, "could not delegate", err)
 
 	return base64.StdEncoding.EncodeToString(eres.Response)
 }
 
-func tempFile(data []byte) string {
-	f, err := ioutil.TempFile("", "")
+func (r *roTestInstance) Quit(t *testing.T) {
+	err := os.RemoveAll(r.tempdir)
 	if err != nil {
-		panic(err)
+		t.Logf("warning: could not remove temporary directory: %v", err)
 	}
-	if _, err := f.Write(data); err != nil {
-		panic(err)
-	}
-
-	return f.Name()
+	r.server.Quit(t)
 }
 
-type mocker struct {
-	labels map[string]struct{}
+type roServer struct {
+	cmd *exec.Cmd
 }
 
-func (m mocker) LabelsForPID(int) (map[string]struct{}, error) {
-	return m.labels, nil
+func mustROServer(t *testing.T, vaultPath, certPath, keyPath, addr, metricsPort string) *roServer {
+	binpath, err := exec.LookPath("redoctober")
+	testutil.MustPrefix(t, "could not find 'redoctober' program", err)
+
+	cmd := exec.Command(binpath, "-vaultpath", vaultPath, "-certs", certPath, "-keys",
+		keyPath, "-addr", addr, "-metrics-port", metricsPort)
+	err = cmd.Start()
+	testutil.MustPrefix(t, "could not run 'redoctober'", err)
+
+	// Give redoctober time to start so that API requests won't get there before
+	// it's listening.
+	time.Sleep(time.Second)
+
+	return &roServer{cmd}
+}
+
+func (r *roServer) Quit(t *testing.T) {
+	err := r.cmd.Process.Kill()
+	if err != nil {
+		t.Logf("warning: could not kill 'redoctober' process: %v", err)
+	}
 }
 
 var (

@@ -1,10 +1,1 @@
 bin
-bld
-gopath
-*.deb
-script/run-pal
-testdata/cert/diskrecord.json
-testdata/trustdb.gpg
-testdata/random_seed
-testdata/encrypted
-.GOPATH

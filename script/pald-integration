@@ -1,4 +1,0 @@
-#!/bin/bash -e
-cp /var/lib/redoctober/data/server.crt /tmp/server.crt
-chmod 644 /tmp/server.crt
-exec $@

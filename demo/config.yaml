@@ -1,0 +1,5 @@
+demo:
+  roserver: localhost:8080
+  ca: certs/ca.pem
+  ro_user: demo_machine
+  ro_password: demo_machine

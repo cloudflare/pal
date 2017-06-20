@@ -1,8 +1,5 @@
 docker-compose.yml
-Dockerfile.client
-Dockerfile.server
+Dockerfile.*
 Makefile
-README
-RELEASE_NOTES
+README.md
 .gitignore
-.GOPATH

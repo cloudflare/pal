@@ -39,10 +39,12 @@ type UI struct {
 	Static string `json:"static"`
 }
 
-// HipChat contains the settings for Hipchat integration.
+// HipChat contains the settings for Hipchat integration. The ID is
+// the name that should be used in the startup message.
 type HipChat struct {
 	Host   string `json:"host"`
 	Room   string `json:"room"`
+	ID     string `json:"id"`
 	APIKey string `json:"api_key"`
 }
 
@@ -69,6 +71,11 @@ func (hc *HipChat) Valid() bool {
 type Metrics struct {
 	Host string `json:"host"`
 	Port string `json:"port"`
+}
+
+// Reporting contains configuration for error reporting.
+type Reporting struct {
+	SentryDSN string `json:"sentry_dsn"`
 }
 
 // Delegations contains configuration for persisting delegations.
@@ -98,6 +105,7 @@ type Config struct {
 	UI          *UI          `json:"ui"`
 	HipChat     *HipChat     `json:"hipchat"`
 	Metrics     *Metrics     `json:"metrics"`
+	Reporting   *Reporting   `json:"reporting"`
 	Delegations *Delegations `json:"delegations"`
 }
 
@@ -124,6 +132,7 @@ func New() *Config {
 		UI:          &UI{},
 		HipChat:     &HipChat{},
 		Metrics:     &Metrics{},
+		Reporting:   &Reporting{},
 		Delegations: &Delegations{},
 	}
 }

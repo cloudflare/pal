@@ -12,9 +12,9 @@ import (
 	"syscall"
 
 	"github.com/cloudflare/pal"
+	"github.com/cloudflare/pal/log"
 	"github.com/coreos/go-systemd/activation"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/uber-go/zap"
 )
 
 var (
@@ -22,11 +22,10 @@ var (
 
 	config      = flag.String("config", "config.yaml", "Configuration yaml file.")
 	env         = flag.String("env", "", "Environment name for config section (default is APP_ENV).")
-	addr        = flag.String("addr", "", "Domain socket to listen on. Accepted unix:///path or fd://n")
+	httpAddr    = flag.String("addr.http", "", "Legacy HTTP Daemon socket to connect to. Accepted unix:///path or fd://n")
+	rpcAddr     = flag.String("addr.rpc", "", "RPC Daemon socket to connect to. Accepted unix:///path or fd://n")
 	metricsAddr = flag.String("metrics-addr", "127.0.0.1:8974", "HTTP listen address for metrics")
 	version     = flag.Bool("v", false, "show the version number and exit")
-
-	logger = zap.New(zap.NewTextEncoder())
 )
 
 func main() {
@@ -39,23 +38,31 @@ func main() {
 
 	r, err := os.Open(*config)
 	if err != nil {
-		logger.Fatal("failed to open server configuration file", zap.Error(err))
+		log.Fatalf("Could not open server configuration file: %v", err)
 	}
-	conf, err := pal.LoadServerConfig(r, *env)
+	conf, err := pal.LoadServerConfigEntry(r, *env)
 	if err != nil {
-		logger.Fatal("failed to parse server configuration", zap.Error(err))
+		log.Fatalf("Could not parse server configuration: %v", err)
 	}
-	srv, err := pal.NewServer(logger, conf)
+	srv, err := pal.NewServer(conf)
 	if err != nil {
-		logger.Fatal("failed to initialize PAL server", zap.Error(err))
+		log.Fatalf("Failed to initialize PAL server: %v", err)
 	}
 
-	listeners, err := getListeners(*addr)
+	addrs := []string{}
+	if *httpAddr != "" {
+		addrs = append(addrs, *httpAddr)
+	}
+	if *rpcAddr != "" {
+		addrs = append(addrs, *rpcAddr)
+	}
+
+	listeners, err := getListeners(addrs...)
 	if err != nil {
-		logger.Fatal("failed to open listeners", zap.String("addr", *addr), zap.Error(err))
+		log.Fatalf("Failed to get listener: %v", err)
 	}
 	if len(listeners) == 0 {
-		logger.Fatal("failed to get any listener", zap.String("addr", *addr))
+		log.Fatalf("Failed to get any listener for %v ", addrs)
 	}
 
 	errch := make(chan error)
@@ -64,7 +71,7 @@ func main() {
 	go func() {
 		<-c
 		for _, l := range listeners {
-			logger.Info("closing listener", zap.Stringer("addr", l.Addr()))
+			log.Infof("Closing %s", l.Addr())
 			if err := l.Close(); err != nil {
 				errch <- fmt.Errorf("Failed to close %s: %v", l.Addr(), err)
 				return
@@ -77,16 +84,23 @@ func main() {
 		errch <- serveMetrics()
 	}()
 
-	if l, ok := listeners[*addr]; ok {
+	if l, ok := listeners[*rpcAddr]; ok {
 		go func() {
-			logger.Info("Listening", zap.Stringer("addr", l.Addr()))
+			log.Infof("Listening to rpc addr: %s", l.Addr())
 			errch <- srv.ServeRPC(l)
+		}()
+	}
+
+	if l, ok := listeners[*httpAddr]; ok {
+		go func() {
+			log.Infof("Listening to http addr: %s", l.Addr())
+			errch <- http.Serve(l, prometheus.InstrumentHandler("pald_HTTP", srv))
 		}()
 	}
 
 	for err := range errch {
 		if err != nil {
-			logger.Error("server exitted", zap.Error(err))
+			log.Errorf("exit with error: %v", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -173,7 +187,7 @@ func listenFDAddrs(addrs []string) (map[string]net.Listener, error) {
 			continue
 		}
 		if err := ls.Close(); err != nil {
-			logger.Error("failed to close systemd activated socket", zap.Int("fd", i+3), zap.Error(err))
+			log.Errorf("failed to close systemd activated socket %d: %v", i+3, err)
 		}
 	}
 	return listeners, nil

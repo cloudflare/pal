@@ -7,17 +7,16 @@ import (
 	"os"
 
 	"github.com/cloudflare/pal"
-	"github.com/uber-go/zap"
+	"github.com/cloudflare/pal/log"
 )
 
 var (
 	Version = "This is filled at build time"
 
-	env     = flag.String("env", "", "Environment name for config section (default is APP_ENV).")
-	socket  = flag.String("socket", "/run/pald/pald.sock", "Socket file for pald.")
-	version = flag.Bool("v", false, "show the version number and exit")
-
-	logger = zap.New(zap.NewTextEncoder())
+	env        = flag.String("env", "", "Environment name for config section (default is APP_ENV).")
+	socket     = flag.String("socket", "/run/pald/pald-rpc.sock", "Socket file for pald.")
+	socketType = flag.String("socket.type", "rpc", "Whether to communicate using rpc or http")
+	version    = flag.Bool("v", false, "show the version number and exit")
 )
 
 func main() {
@@ -34,19 +33,25 @@ func main() {
 
 	secretsYAML := os.Getenv("PAL_SECRETS_YAML")
 	if secretsYAML == "" {
-		logger.Fatal("missing PAL_SECRETS_YAML environment variable")
+		log.Fatal("missing PAL_SECRETS_YAML environment variable")
 	}
 
 	if *env == "" {
-		logger.Fatal("missing -env flag or APP_ENV environment variable")
+		log.Fatal("missing -env flag or APP_ENV environment variable")
 	}
 
-	client, err := pal.NewClient(bytes.NewBufferString(secretsYAML), *socket, *env)
-	if err != nil {
-		logger.Fatal("failed to initialize PAL client", zap.Error(err))
+	var client pal.Client
+	switch *socketType {
+	case "rpc":
+		client = pal.NewClientV2(bytes.NewBufferString(secretsYAML), *socket, *env)
+	case "http":
+		client = pal.NewClientV1(bytes.NewBufferString(secretsYAML), *socket, *env)
+	default:
+		log.Fatal("socket.type must be 'rpc' or 'http'")
 	}
+
 	if err := client.Decrypt(); err != nil {
-		logger.Fatal("failed to decrypt secrets", zap.Error(err))
+		log.Fatal(err)
 	}
 
 	args := os.Args[1:]
@@ -58,9 +63,6 @@ func main() {
 	}
 
 	if err := client.Exec(args, os.Environ()); err != nil {
-		logger.Fatal("failed to execute command",
-			zap.Object("args", args),
-			zap.Object("env", os.Environ()),
-			zap.Error(err))
+		log.Fatal(err)
 	}
 }

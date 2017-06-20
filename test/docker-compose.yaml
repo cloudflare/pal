@@ -1,0 +1,41 @@
+version: '2'
+
+services:
+  redoctober:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.redoctober
+    volumes:
+      - ../bin:/testbin
+      - ./certs:/certs
+    ports:
+      - 8080:8080
+    networks:
+      - redoctober
+
+  pald:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.pald
+    pid: host
+    volumes:
+      - ../bin:/testbin
+      - ./certs:/certs
+      - run:/var/run
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    networks:
+      - redoctober
+
+  pal:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.pal
+    volumes:
+      - ../bin:/testbin
+      - run:/var/run
+
+networks:
+  redoctober:
+
+volumes:
+  run:
