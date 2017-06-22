@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/cloudflare/pal/trustedlabels"
-	ro "github.com/cloudflare/redoctober"
 	"github.com/cloudflare/redoctober/client"
 	roConfig "github.com/cloudflare/redoctober/config"
 	"github.com/cloudflare/redoctober/core"
+	ro "github.com/cloudflare/redoctober/server"
 	"github.com/uber-go/zap"
 )
 
