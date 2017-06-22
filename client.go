@@ -17,6 +17,20 @@ import (
 	shellwords "github.com/mattn/go-shellwords"
 )
 
+// config represents a parsed PAL client YAML configuration entry. Note
+// that this is not the schema for a PAL client YAML configuration file.
+// Instead, a PAL client YAML configuration file is itself a map where the keys
+// are environment names, and each value is a single entry (represented by this
+// type). In other words, the full parsed config file is represented by
+// map[string]*ConfigEntry
+//
+// The following is an example configuration file:
+//  dev:
+//    env:
+//      SECRET: dev-secret
+//  prod:
+//    env:
+//      SECRET: ro:4VUfu2xX0KGcvRmP76e4VkdESQziR1S4kh7/TRoNOVJ
 type config struct {
 	Envs       map[string]string `yaml:"env,omitempty"`
 	Files      map[string]string `yaml:"file,omitempty"`
@@ -43,9 +57,9 @@ func loadConfig(r io.Reader, environment string) (*config, error) {
 	return nil, fmt.Errorf("missing config section %q", environment)
 }
 
-// Client is a PAL client. iIt can communicates with the PAL daemon, sends the
-// secret decryption requests, receive the decrypted secrets, setup and execute
-// the chosen program in an correct environment.
+// Client represents a PAL client capable of issuing deryption requests to the
+// PAL daemon and executing the chosen program in a correct environment with
+// decrypted secrets.
 type Client struct {
 	socketAddr string
 	dialFunc   func(network, addr string) (net.Conn, error)
