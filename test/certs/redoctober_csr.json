@@ -1,0 +1,18 @@
+{
+  "key": {
+    "algo": "ecdsa",
+    "size": 256
+  },
+  "CN": "(demo use only)",
+  "hosts": ["localhost", "127.0.0.1", "redoctober"],
+  "names": [
+    {
+    "C": "US",
+    "L": "San Francisco",
+    "ST": "California",
+    "O": "Cloudflare, Inc.",
+    "OU": "PAL Red October Server"
+    }
+  ]
+}
+

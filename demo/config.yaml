@@ -1,4 +1,3 @@
-# this is usable inside Dockerfile.server container
 demo:
   roserver: localhost:8080
   ca: certs/ca.pem

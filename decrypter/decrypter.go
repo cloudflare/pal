@@ -14,25 +14,24 @@ func init() {
 	valRegex = regexp.MustCompile(`(\w+)\+?(\w*):(.+)`)
 }
 
-// Secret contains the decrypted secrets and its associated labels
+// A Secret represents a decrypted secret. Each secret can have multiple labels
+// and multiple values.
 type Secret struct {
 	Labels []string `json:"labels"`
 	Value  []byte   `json:"value"`
 }
 
-// A Decrypter provides implentation to decrypt its compatible encrypted secrets
+// A Decrypter is a generic interface that abstracts away the details of
+// performing a decryption. Currently, PGP and Red October are supported.
 type Decrypter interface {
-	// Decrypt  returns the decrypted secret and its labels as `Secret`
-	Decrypt(io.Reader) (*Secret, error)
+	// Decrypt the ciphertext r.
+	Decrypt(r io.Reader) (*Secret, error)
 }
 
-// SplitPALValue split the PAL-scheme message contains the encrypted secret,
-// the decrypter type and whether the encrypted secret is binary hence should be
-// base64-encoded before sending back to the client.
-//
-// The format can be noted as:
-//		decrypterType[+base64]:encryptedSecret
-func SplitPALValue(line string) (decrypterType string, binary bool, value string) {
+// SplitPALValue parses a PAL secret, returning the parsed decrypter type,
+// whether or not the plaintext is itself base64-encoded, and the value of the
+// ciphertext.
+func SplitPALValue(line string) (decrypterType string, base64 bool, value string) {
 	s := valRegex.FindAllStringSubmatch(line, -1)
 	if s == nil || (len(s) != 1 && len(s[0]) != 4) {
 		return "", false, ""
@@ -41,12 +40,11 @@ func SplitPALValue(line string) (decrypterType string, binary bool, value string
 	return matched[1], matched[2] == base64Infix, matched[3]
 }
 
-// JoinPalValue returns the value that should be sent to the client taking into
-// account whether the value is base64-encoded, hence should be decoded by the
-// client.
-func JoinPalValue(binary bool, value string) string {
-	if binary {
-		return "base64:" + value
-	}
-	return value
-}
+// // JoinPALValue encodes a PAL secret plaintext by appending the prefix "base64:"
+// // if the base64 argument is true.
+// func JoinPALValue(base64 bool, value string) string {
+// 	if base64 {
+// 		return "base64:" + value
+// 	}
+// 	return value
+// }

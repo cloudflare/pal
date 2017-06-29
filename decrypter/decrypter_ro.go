@@ -10,31 +10,30 @@ import (
 	"github.com/cloudflare/redoctober/cryptor"
 )
 
-// RODecrypter decrypts RedOctober encrypted secrets
-type RODecrypter struct {
+type roDecrypter struct {
 	name     string
 	password string
 	server   *client.RemoteServer
 }
 
-// NewRODecrypter returns an decrypter using the provided username/password
-// credentials which can decrypt RedOctober secrets that were delegated to that
-// user.
+// NewRODecrypter returns a new Decrypter that operates by making decryption
+// requests to the specified Red October server with the given credentials.
+//
+// caPath is a path to a CA file that will be used to validate the server's
+// identity. If it is empty, the system's default CA pool will be used.
 func NewRODecrypter(name, password, server, caPath string) (Decrypter, error) {
 	s, err := client.NewRemoteServer(server, caPath)
 	if err != nil {
 		return nil, err
 	}
-	return &RODecrypter{
+	return &roDecrypter{
 		name:     name,
 		password: password,
 		server:   s,
 	}, nil
 }
 
-// Decrypt requests the RedOctober server to decrypt the secret and returns
-// the decrypted secret and its labels.
-func (d *RODecrypter) Decrypt(ct io.Reader) (*Secret, error) {
+func (d *roDecrypter) Decrypt(ct io.Reader) (*Secret, error) {
 	data, err := ioutil.ReadAll(ct)
 	if err != nil {
 		return nil, err

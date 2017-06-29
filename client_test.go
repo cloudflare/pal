@@ -14,14 +14,14 @@ import (
 
 func TestConfig(t *testing.T) {
 	tests := []struct {
-		config *config
+		Config *ConfigEntry
 		Env    string
 		Err    error
 	}{
 		// valid configs
 		{
 			Env: "production",
-			config: &config{
+			Config: &ConfigEntry{
 				Envs: map[string]string{
 					"FOO_BAR": "ro:CIPHERTEXT",
 				},
@@ -34,7 +34,7 @@ func TestConfig(t *testing.T) {
 		},
 		{
 			Env: "staging",
-			config: &config{
+			Config: &ConfigEntry{
 				Envs: map[string]string{
 					"BAZ": "PLAIN TEXT VALUE",
 				},
@@ -55,7 +55,7 @@ func TestConfig(t *testing.T) {
 	for _, test := range tests {
 		buf := bytes.NewBufferString(testYAML)
 
-		config, err := loadConfig(buf, test.Env)
+		config, err := loadConfigEntry(buf, test.Env)
 		if err != nil {
 			if test.Err != nil {
 				if test.Err.Error() != err.Error() {
@@ -67,8 +67,8 @@ func TestConfig(t *testing.T) {
 			continue
 		}
 
-		if !reflect.DeepEqual(test.config, config) {
-			t.Errorf("want config %+v, got %+v", test.config, config)
+		if !reflect.DeepEqual(test.Config, config) {
+			t.Errorf("want config %+v, got %+v", test.Config, config)
 		}
 	}
 }
@@ -113,12 +113,12 @@ func TestClientExec(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpdir)
 
-	cfg := &config{
+	config := &ConfigEntry{
 		EntryPoint: "env -t /foo/bar.tmpl:/foo/bar -E",
 		Command:    "true -entrypoint-flag=foo --",
 	}
 
-	client := newClient(cfg, path.Join(tmpdir, "test.sock"))
+	client := newClientV2(config, path.Join(tmpdir, "test.sock"))
 
 	// assume that the secrets have been decrypted here
 	client.config.Envs = map[string]string{

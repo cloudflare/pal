@@ -1,34 +1,64 @@
-# PAL - Permissive Access Link
+PAL
+===
 
-PAL is a tool for injecting secrets into Docker containers.
-PAL consists of two components:
+PAL is a tool for provisioning secrets to docker containers in production.
 
-- `pald`: lives on the host, handles identity verification, secrets decryption
-- `pal`: lives in the container, request secret decryption and setup container
-  environment.
+# Architecture
+
+PAL uses a client/server architecture consisting of two components: a `pal`
+client which runs as the entrypoint to a container, and `pald`, which is a
+daemon that runs outside of the container, accepts requests from `pal` instances
+over a unix domain socket, and makes access control decisions.
+
+PAL provisions secrets by distributing ciphertexts. A container must have access
+to ciphertexts of the secrets that it wishes to access. The `pal` client sends
+these to `pald`, which decrypts them.
+
+## Backends
+
+Currently, PAL supports two backends: PGP and Red October.
+
+### PGP
+
+The PGP backend uses a static PGP key to decrypt ciphertexts. The `pald` daemon
+must have access to this key in order to perform decryption. The `palpgpenc`
+tool (see `cmd/palpgpenc`) can be used to encrypt secrets for a particular PGP
+key.
+
+### Red October
+
+The Red October backend uses [Red October](https://github.com/cloudflare/redoctober)
+to decrypt ciphertexts. Since decryption requests come from `pald`, `pald` must
+have its own user account in Red October, or otherwise must have access to the
+credentials to a shared user account. Secrets owners then delegation decryption
+access to the `pald` account so that `pald` can request decryption on behalf of
+`pal`.
+
+# Configuration
 
 `pal` requires a `PAL_SECRETS_YAML` environment variable in your container.
-`PAL_SECRETS_YAML` is broken into blocks named by environments.
-The name of your desired environment must be provided to pal via the `-env` flag or via the `APP_ENV` environment variable.
-The environments are further divided into `env` and `file` blocks, each of which is a YAML dictionary.
-The `env` block maps environment variable names to their contents,
-while the `file` block maps file paths to their contents.
-`pal` writes files as the current container's user, but the file
-permissions must be set by the chosen command if necessary.
+`PAL_SECRETS_YAML` is broken into blocks named by environments. The name of your
+desired environment must be provided to `pal` via the `-env` flag or via the
+`APP_ENV` environment variable. The environments are further divided into `env`
+and `file` blocks, each of which is a YAML dictionary. The `env` block maps
+environment variable names to their contents, while the `file` block maps file
+paths to their contents. `pal` writes files as the current container's user, but
+the file permissions must be set by the chosen command if necessary.
 
-Both blocks admit contents in one of these schemes, denoted by adding a prefix to the contents:
+Both blocks admit contents in one of these schemes, denoted by adding a prefix
+to the contents:
 
-- ro: Red October encrypted data.
+* `ro`: Red October encrypted data.
   The value placed under the key will be returned after Red October decryption.
-- ro+base64: Red October encrypted, base64-encoded data.
+* `ro+base64`: Red October encrypted, base64-encoded data.
   The value placed under this key will be returned after Red October decryption
   followed by base64 decoding. This is useful for binary data, as Red October
   only handles secrets encoded as strings.
-- pgp: PGP encrypted data.
+* `pgp`: PGP encrypted data.
   The value placed under the key will be returned after `pald` decrypt it using
   one of its configured keyrings
-- pgp+base64: PGP encrypted, base64-encoded data.
-- No prefix: Data with no prefix are just returned as read from the file.
+* `pgp+base64`: PGP encrypted, base64-encoded data.
+* No prefix: Data with no prefix are just returned as read from the file.
   This is useful for defining a development environment with well-known secrets.
 
 An example of `PAL_SECRETS_YAML` is as follow:
@@ -94,10 +124,14 @@ PAL_SECRETS_YAML: |
         KcUtSbz0ifQ==
 ```
 
-## Building and testing
+# Building and testing
 
-- `make`: run the unit tests then build the binaries
-- `make test`: run unit tests
-- `make integration`: run the integration test stack including redoctober,
-  pal and pald. It will try to generate RedOctober encrypted secrets and also
-  PGP encrypted secrets then try to decrypt them with the pal client.
+* `make`: build the binaries, placing them in `bin`
+* `make test`: run unit tests
+* `make integration-test`: run the integration test stack including `redoctober`,
+  `pal` and `pald`. See `README.md` in the `test` directory for more details.
+
+# Demo
+
+For a demonstration of integrating PAL with the Red October backend, see the
+`demo` directory.

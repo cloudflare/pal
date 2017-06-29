@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/cloudflare/pal/decrypter"
-	"github.com/uber-go/zap"
+	"github.com/cloudflare/pal/log"
 
 	"golang.org/x/crypto/openpgp"
 )
@@ -25,8 +25,6 @@ var (
 	keyIDs      = flag.String("keyids", "", `required: comma-separated full key ids (e.g. "6C7EE1B8621CC013") that can decrypt the message`)
 	pubRingPath = flag.String("pubring", os.Getenv("HOME")+"/.gnupg/pubring.gpg", "pgp pubring location")
 	version     = flag.Bool("v", false, "show the version number and exit")
-
-	logger = zap.New(zap.NewTextEncoder())
 )
 
 func main() {
@@ -40,34 +38,34 @@ func main() {
 	labelList := strings.Split(*labels, ",")
 	if len(labelList) == 0 || len(labelList[0]) == 0 {
 		fmt.Println("Label list is required")
-		fmt.Println("Example:")
-		fmt.Println("\techo -n my-secret-pgp-password | palpgpenc -labels=testpal -keyids=6C7EE1B8621CC013")
-		fmt.Println("\nFlags:")
+		fmt.Println("Usage:")
 		flag.PrintDefaults()
+		fmt.Println("Example:")
+		fmt.Println("  echo -n my-secret-pgp-password | palpgpenc -labels=testpal -keyids=6C7EE1B8621CC013")
 		os.Exit(1)
 	}
 
 	keyIDList := strings.Split(*keyIDs, ",")
 	if len(keyIDList) == 0 || len(keyIDList[0]) == 0 {
 		fmt.Println("Key IDs are required")
-		fmt.Println("Example:")
-		fmt.Println("\techo -n my-secret-pgp-password | palpgpenc -labels=testpal -keyids=6C7EE1B8621CC013")
-		fmt.Println("\nFlags:")
+		fmt.Println("Usage:")
 		flag.PrintDefaults()
+		fmt.Println("Example:")
+		fmt.Println("  echo -n my-secret-pgp-password | palpgpenc -labels=testpal -keyids=6C7EE1B8621CC013")
 		os.Exit(1)
 	}
 
-	conf := decrypter.NewPacketConfig(*cipher, *hash)
+	conf := decrypter.NewPGPPacketConfig(*cipher, *hash)
 	pubRing, err := os.Open(*pubRingPath)
 	if err != nil {
-		logger.Fatal("failed to open pubring", zap.Error(err))
+		log.Fatalf("Failed to open pubring %v", err)
 	}
 	pubKeys, err := openpgp.ReadKeyRing(pubRing)
 	if err != nil {
-		logger.Fatal("failed to read pubring", zap.Error(err))
+		log.Fatalf("Failed to open pubring %v", err)
 	}
 	if err := pubRing.Close(); err != nil {
-		logger.Fatal("failed to close pubring", zap.Error(err))
+		log.Fatalf("Failed to close pubring %v", err)
 	}
 
 	recipients := []*openpgp.Entity{}
@@ -88,12 +86,12 @@ func main() {
 	}
 
 	if len(recipients) == 0 {
-		logger.Fatal("failed to find any recipients", zap.Object("key_id_list", keyIDList))
+		log.Fatalf("failed to find any recipients with long key id matched %v", keyIDList)
 	}
 
 	secretBuf := bytes.NewBuffer(nil)
 	if n, err := io.Copy(secretBuf, os.Stdin); err != nil {
-		logger.Fatal("failed to write encrypted data", zap.Int64("written", n), zap.Error(err))
+		log.Fatalf("Failed to write encrypted data to the buffer (written %d) %v", n, err)
 	}
 	secret := &decrypter.Secret{
 		Labels: labelList,
@@ -103,16 +101,16 @@ func main() {
 	output := base64.NewEncoder(base64.StdEncoding, os.Stdout)
 	plaintextWriter, err := openpgp.Encrypt(output, recipients, nil, nil, conf)
 	if err != nil {
-		logger.Fatal("failed to open pgp encrypted writer", zap.Error(err))
+		log.Fatalf("Failed to open encrypted writer %v", err)
 	}
 	if err := json.NewEncoder(plaintextWriter).Encode(secret); err != nil {
-		logger.Fatal("failed to encrypt data", zap.Error(err))
+		log.Fatalf("Failed to write encrypted data: %v", err)
 	}
 
 	if err := plaintextWriter.Close(); err != nil {
-		logger.Fatal("failed to close plaintext writer", zap.Error(err))
+		log.Fatalf("Failed to close plaintext writer: %v", err)
 	}
 	if err := output.Close(); err != nil {
-		logger.Fatal("failed to close base64 encoder", zap.Error(err))
+		log.Fatalf("Failed to close output: %v", err)
 	}
 }

@@ -13,7 +13,7 @@ func TestPGPDecrypter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to initialized pgp decrypter %v", err)
 	}
-	dec := (decrypter).(*PGPDecrypter)
+	dec := (decrypter).(*pgpDecrypter)
 
 	buf := bytes.NewBuffer(nil)
 	text, err := openpgp.Encrypt(buf, dec.keys, nil, nil, dec.config)

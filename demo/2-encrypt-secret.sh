@@ -23,5 +23,5 @@ demo:
     /tmp/secret.txt: "ro:$CT2"
 EOF
 
-echo "Encrypted secrets and wrote them to tmp/pal_secrets.yml:"
+echo "Encrypted secrets and wrote them to tmp/pal_secrets.yaml:"
 cat tmp/pal_secrets.yaml

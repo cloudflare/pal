@@ -1,0 +1,19 @@
+{
+  "key": {
+    "algo": "ecdsa",
+    "size": 256
+  },
+  "names": [
+    {
+    "C": "US",
+    "L": "San Francisco",
+    "ST": "California",
+    "O": "Cloudflare, Inc.",
+    "OU": "PAL Certificate Authority"
+    }
+  ],
+  "cn": "(demo use only)",
+  "ca": {
+    "expiry": "876000h"
+  }
+}
