@@ -17,6 +17,20 @@ import (
 	shellwords "github.com/mattn/go-shellwords"
 )
 
+// config represents a parsed PAL client YAML configuration entry. Note
+// that this is not the schema for a PAL client YAML configuration file.
+// Instead, a PAL client YAML configuration file is itself a map where the keys
+// are environment names, and each value is a single entry (represented by this
+// type). In other words, the full parsed config file is represented by
+// map[string]*ConfigEntry
+//
+// The following is an example configuration file:
+//  dev:
+//    env:
+//      SECRET: dev-secret
+//  prod:
+//    env:
+//      SECRET: ro:4VUfu2xX0KGcvRmP76e4VkdESQziR1S4kh7/TRoNOVJ
 type config struct {
 	Envs       map[string]string `yaml:"env,omitempty"`
 	Files      map[string]string `yaml:"file,omitempty"`
@@ -43,16 +57,13 @@ func loadConfig(r io.Reader, environment string) (*config, error) {
 	return nil, fmt.Errorf("missing config section %q", environment)
 }
 
-// Client is a PAL client. iIt can communicates with the PAL daemon, sends the
-// secret decryption requests, receive the decrypted secrets, setup and execute
-// the chosen program in an correct environment.
+// Client represents a PAL client capable of issuing deryption requests to the
+// PAL daemon and executing the chosen program in a correct environment with
+// decrypted secrets.
 type Client struct {
 	socketAddr string
 	dialFunc   func(network, addr string) (net.Conn, error)
 	config     *config
-
-	envSecrets  map[string]string
-	fileSecrets map[string]string
 }
 
 // NewClient initializes a Client given its configuration stream, PAL socket
@@ -79,18 +90,12 @@ func newClient(config *config, socketAddr string) *Client {
 }
 
 // Decrypt requests PAL server to decrypt the encrypted secrets
-func (c *Client) Decrypt() (err error) {
-	if c.hasSecrets(c.config.Envs) {
-		c.envSecrets, err = c.decryptMap(c.config.Envs)
-		if err != nil {
-			return err
-		}
+func (c *Client) Decrypt() error {
+	if err := c.decryptMap(c.config.Envs); err != nil {
+		return fmt.Errorf("Failed to decrypt env secrets: %v", err)
 	}
-	if c.hasSecrets(c.config.Files) {
-		c.fileSecrets, err = c.decryptMap(c.config.Files)
-		if err != nil {
-			return err
-		}
+	if err := c.decryptMap(c.config.Files); err != nil {
+		return fmt.Errorf("Failed to decrypt file secrets: %v", err)
 	}
 	return nil
 }
@@ -123,10 +128,10 @@ func (c *Client) Exec(argv, environ []string) error {
 		return err
 	}
 
-	env := make([]string, len(environ), len(environ)+len(c.envSecrets))
+	env := make([]string, len(environ), len(environ)+len(c.config.Envs))
 	copy(env, environ)
 
-	for k, v := range c.envSecrets {
+	for k, v := range c.config.Envs {
 		data, err := base64Decode(v)
 		if err != nil {
 			return err
@@ -137,7 +142,7 @@ func (c *Client) Exec(argv, environ []string) error {
 		}
 	}
 
-	for path, val := range c.fileSecrets {
+	for path, val := range c.config.Files {
 		data, err := base64Decode(val)
 		if err != nil {
 			return err
@@ -161,13 +166,23 @@ func (c *Client) Exec(argv, environ []string) error {
 	return execFunc(argv0, argv, env)
 }
 
-func (c *Client) decryptMap(m map[string]string) (map[string]string, error) {
-	dreq := &decryptionRequest{Ciphertexts: m}
+func (c *Client) decryptMap(m map[string]string) error {
+	dreq := &decryptionRequest{
+		Ciphertexts: make(map[string]string),
+	}
+	for k, v := range m {
+		if isSecret(v) {
+			dreq.Ciphertexts[k] = v
+		}
+	}
 	dresp, err := c.doRPCDecryptionRequest(dreq)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return dresp.Secrets, nil
+	for k, v := range dresp.Secrets {
+		m[k] = v
+	}
+	return nil
 }
 
 func (c *Client) doRPCDecryptionRequest(dreq *decryptionRequest) (*decryptionResponse, error) {
@@ -193,18 +208,16 @@ func (c *Client) doRPCDecryptionRequest(dreq *decryptionRequest) (*decryptionRes
 	return dresp, nil
 }
 
-func (c *Client) hasSecrets(section map[string]string) bool {
+func isSecret(v string) bool {
 	secretPrefixes := []string{
 		"ro:",
 		"ro+base64:",
 		"pgp:",
 		"pgp+base64:",
 	}
-	for _, v := range section {
-		for _, prefix := range secretPrefixes {
-			if strings.HasPrefix(v, prefix) {
-				return true
-			}
+	for _, prefix := range secretPrefixes {
+		if strings.HasPrefix(v, prefix) {
+			return true
 		}
 	}
 	return false

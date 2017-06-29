@@ -87,6 +87,10 @@ func main() {
 		}
 	}
 
+	if len(recipients) == 0 {
+		logger.Fatal("failed to find any recipients", zap.Object("key_id_list", keyIDList))
+	}
+
 	secretBuf := bytes.NewBuffer(nil)
 	if n, err := io.Copy(secretBuf, os.Stdin); err != nil {
 		logger.Fatal("failed to write encrypted data", zap.Int64("written", n), zap.Error(err))
